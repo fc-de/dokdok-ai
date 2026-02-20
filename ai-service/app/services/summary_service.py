@@ -1,18 +1,25 @@
 import json
 import asyncio
+from typing import Optional
 
 from google import genai
 from google.genai import types
 
 from app.config import settings
 from app.schemas.summary import TopicSummaryRequest, SummaryResponse
+from app.schemas.stt import PreAnswerInput
 
 
 _SYSTEM_INSTRUCTION = (
-    "You summarize reading club data in warm, friendly Korean. Use a casual "
-    "but polite tone (\"~요\") and write as if you are speaking to a member. "
-    "Return strict JSON with keys: summary (string), highlights (array of strings), "
-    "keywords (array of strings)."
+    "You summarize reading club discussions in Korean. Use a casual but polite "
+    "tone (\"~요\"), but avoid chatty phrases and avoid thanking. "
+    "Return strict JSON with keys: summary (string), mainPoints (array of strings). "
+    "The summary string must follow this format:\n"
+    "1) Title line: use the topic title if provided; otherwise infer a short title.\n"
+    "2) Subtitle line: one short sentence describing the topic.\n"
+    "3) A line with '핵심 요약' then a short paragraph (2-4 sentences).\n"
+    "Do NOT include '주요 포인트' in the summary. Put points into mainPoints only.\n"
+    "mainPoints should have 2-4 concise items."
 )
 
 
@@ -27,10 +34,32 @@ def _parse_summary_payload(content: str) -> SummaryResponse:
     except json.JSONDecodeError:
         return SummaryResponse(summary=content)
 
+    if isinstance(data, list):
+        if all(isinstance(item, str) for item in data):
+            return SummaryResponse(summary="", mainPoints=data)
+        if all(isinstance(item, dict) for item in data):
+            summaries: list[str] = []
+            points: list[str] = []
+            for item in data:
+                summary = item.get("summary")
+                if isinstance(summary, str) and summary.strip():
+                    summaries.append(summary.strip())
+                main_points = item.get("mainPoints") or item.get("highlights")
+                if isinstance(main_points, list):
+                    points.extend([p for p in main_points if isinstance(p, str)])
+            if summaries or points:
+                return SummaryResponse(
+                    summary="\n\n".join(summaries),
+                    mainPoints=points or None,
+                )
+        return SummaryResponse(summary=content)
+
+    if not isinstance(data, dict):
+        return SummaryResponse(summary=content)
+
     return SummaryResponse(
         summary=data.get("summary") or "",
-        highlights=data.get("highlights"),
-        keywords=data.get("keywords"),
+        mainPoints=data.get("mainPoints") or data.get("highlights"),
     )
 
 
@@ -89,7 +118,37 @@ async def summarize_preanswers(req: TopicSummaryRequest) -> SummaryResponse:
     return await _summarize(messages)
 
 
-async def summarize_stt(text: str) -> SummaryResponse:
+def _format_preanswers(preanswers: list[PreAnswerInput]) -> str:
+    lines: list[str] = []
+    for item in preanswers:
+        content = (item.content or "").strip()
+        if not content:
+            continue
+        topic_part = f"topicId={item.topicId}"
+        if item.topicTitle:
+            topic_part += f", topicTitle={item.topicTitle}"
+        lines.append(f"- {topic_part}, userId={item.userId}: {content}")
+    return "\n".join(lines)
+
+
+async def summarize_stt(
+    text: str,
+    preanswers: Optional[list[PreAnswerInput]] = None,
+) -> SummaryResponse:
+    cleaned_text = (text or "").strip()
+    formatted = _format_preanswers(preanswers or [])
+    if not cleaned_text and not formatted:
+        raise ValueError("No content to summarize")
+
+    user_content = cleaned_text
+    if preanswers:
+        if formatted:
+            user_content = (
+                "Transcript:\n"
+                f"{cleaned_text}\n\n"
+                "Pre-answers:\n"
+                f"{formatted}"
+            )
     messages = [
         {
             "role": "system",
@@ -97,6 +156,6 @@ async def summarize_stt(text: str) -> SummaryResponse:
                 "You summarize meeting transcripts."
             ),
         },
-        {"role": "user", "content": text},
+        {"role": "user", "content": user_content},
     ]
     return await _summarize(messages)

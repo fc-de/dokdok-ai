@@ -20,5 +20,4 @@ class SttSummaryRequest(BaseModel):
 
 class SummaryResponse(BaseModel):
     summary: str
-    highlights: Optional[List[str]] = None
-    keywords: Optional[List[str]] = None
+    mainPoints: Optional[List[str]] = None
