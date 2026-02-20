@@ -3,3 +3,5 @@ uvicorn
 pydantic-settings
 python-multipart
 google-genai
+httpx
+ 
