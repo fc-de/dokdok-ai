@@ -14,7 +14,7 @@ from app.schemas.stt import (
     SttSummaryResponse,
     TopicSummaryResponse,
 )
-from app.services.summary_service import summarize_stt
+from app.services.summary_service import summarize_stt, summarize_topic
 
 
 _ALLOWED_EXTENSIONS = {
@@ -136,30 +136,65 @@ async def transcribe_and_summarize(req: SttRequest) -> SttSummaryResponse:
     if error:
         raise ValueError(error)
 
-    summary = await summarize_stt(text or "", req.preAnswers)
-    _logger.info(
-        "Summary generated: summary_len=%d, main_points=%d",
-        len(summary.summary or ""),
-        len(summary.mainPoints or []),
-    )
-    key_points = [KeyPointResponse(title=point, details=[]) for point in summary.mainPoints or []]
+    # 토픽 목록 추출 (중복 제거, 순서 유지)
+    topic_map: dict[int, dict] = {}
+    if req.preAnswers:
+        for item in req.preAnswers:
+            if item.topicId is not None and item.topicId not in topic_map:
+                topic_map[item.topicId] = {
+                    "topicId": item.topicId,
+                    "topicTitle": item.topicTitle or "",
+                    "topicDescription": item.topicDescription or "",
+                    "confirmOrder": item.confirmOrder,
+                }
 
     topics: list[TopicSummaryResponse] = []
-    if req.preAnswers:
-        seen: set[int] = set()
-        for item in req.preAnswers:
-            if item.topicId is None or item.topicId in seen:
-                continue
-            seen.add(item.topicId)
+
+    if topic_map:
+        # 토픽별로 개별 요약 생성
+        for idx, (topic_id, topic_info) in enumerate(topic_map.items(), start=1):
+            _logger.info("Summarizing topic: topicId=%s, title=%s", topic_id, topic_info["topicTitle"])
+
+            result = await summarize_topic(
+                topic_id=topic_id,
+                topic_title=topic_info["topicTitle"],
+                topic_description=topic_info["topicDescription"],
+                transcript=text or "",
+                preanswers=req.preAnswers or [],
+            )
+
+            key_points = [
+                KeyPointResponse(
+                    title=kp.get("title", ""),
+                    details=kp.get("details", []),
+                )
+                for kp in result.get("keyPoints", [])
+            ]
+
+            confirm_order = topic_info["confirmOrder"] if topic_info["confirmOrder"] else idx
+
             topics.append(
                 TopicSummaryResponse(
-                    topicId=item.topicId,
-                    topicTitle=item.topicTitle,
-                    summary=summary.summary,
+                    topicId=topic_id,
+                    confirmOrder=confirm_order,
+                    topicTitle=topic_info["topicTitle"],
+                    topicDescription=topic_info["topicDescription"] or None,
+                    summary=result.get("summary", ""),
                     keyPoints=key_points or None,
                 )
             )
-    if not topics:
+
+            _logger.info(
+                "Topic summary generated: topicId=%s, summary_len=%d, keyPoints=%d",
+                topic_id,
+                len(result.get("summary", "")),
+                len(key_points),
+            )
+    else:
+        # preAnswers가 없는 경우 기존 방식 (단일 토픽)
+        summary = await summarize_stt(text or "", req.preAnswers)
+        key_points = [KeyPointResponse(title=point, details=[]) for point in summary.mainPoints or []]
+
         topics.append(
             TopicSummaryResponse(
                 topicId=req.topicId,

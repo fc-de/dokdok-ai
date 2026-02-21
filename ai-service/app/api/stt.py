@@ -32,7 +32,7 @@ async def stt_summary(req: SttRequest):
         data = await transcribe_and_summarize(req)
         return ApiResponse(
             code="SUCCESS",
-            message="요청이 성공했습니다.",
+            message="AI 요약 조회 성공",
             data=data.model_dump(),
         )
     except Exception as exc:
