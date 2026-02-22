@@ -6,6 +6,8 @@ from pydantic import BaseModel
 class PreAnswerInput(BaseModel):
     topicId: Optional[int] = None
     topicTitle: Optional[str] = None
+    topicDescription: Optional[str] = None
+    confirmOrder: Optional[int] = None
     userId: int
     content: str
 

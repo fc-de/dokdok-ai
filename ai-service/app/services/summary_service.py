@@ -22,6 +22,15 @@ _SYSTEM_INSTRUCTION = (
     "mainPoints should have 2-4 concise items."
 )
 
+_TOPIC_SYSTEM_INSTRUCTION = (
+    "You summarize reading club discussions for a specific topic in Korean. "
+    "Use a casual but polite tone (\"~요\"), but avoid chatty phrases and avoid thanking. "
+    "Return strict JSON with keys: summary (string), keyPoints (array of objects). "
+    "The summary should be 2-4 sentences summarizing the discussion for this specific topic. "
+    "Each keyPoint object must have: title (string), details (array of strings with 1-3 items). "
+    "keyPoints should have 2-4 items that capture the main discussion points."
+)
+
 
 def _configure_gemini() -> None:
     if not settings.GEMINI_API_KEY:
@@ -159,3 +168,64 @@ async def summarize_stt(
         {"role": "user", "content": user_content},
     ]
     return await _summarize(messages)
+
+
+def _summarize_topic_sync(
+    topic_title: str,
+    topic_description: str,
+    transcript: str,
+    topic_answers: list[PreAnswerInput],
+) -> dict:
+    _configure_gemini()
+    client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+    user_content = f"토픽: {topic_title}\n"
+    if topic_description:
+        user_content += f"설명: {topic_description}\n\n"
+
+    if transcript:
+        user_content += f"토론 내용:\n{transcript}\n\n"
+
+    if topic_answers:
+        answers_text = "\n".join(
+            f"- 참여자{a.userId}: {a.content}" for a in topic_answers
+        )
+        user_content += f"사전 답변:\n{answers_text}"
+
+    response = client.models.generate_content(
+        model=settings.SUMMARY_MODEL,
+        contents=user_content,
+        config=types.GenerateContentConfig(
+            temperature=0.2,
+            system_instruction=_TOPIC_SYSTEM_INSTRUCTION,
+            response_mime_type="application/json",
+        ),
+    )
+
+    try:
+        data = json.loads(response.text or "{}")
+    except json.JSONDecodeError:
+        data = {"summary": response.text or "", "keyPoints": []}
+
+    return {
+        "summary": data.get("summary", ""),
+        "keyPoints": data.get("keyPoints", []),
+    }
+
+
+async def summarize_topic(
+    topic_id: int,
+    topic_title: str,
+    topic_description: str,
+    transcript: str,
+    preanswers: list[PreAnswerInput],
+) -> dict:
+    """토픽별로 요약을 생성"""
+    topic_answers = [p for p in preanswers if p.topicId == topic_id]
+    return await asyncio.to_thread(
+        _summarize_topic_sync,
+        topic_title,
+        topic_description,
+        transcript,
+        topic_answers,
+    )
