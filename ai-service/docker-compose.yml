@@ -1,0 +1,22 @@
+services:
+  ai-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dokdok-ai
+    env_file:
+      - .env
+    environment:
+      TZ: Asia/Seoul
+    # 호스트에는 로컬(127.0.0.1)로만 노출 -> 외부 차단
+    # Spring 컨테이너는 dokdok-shared 네트워크에서 http://dokdok-ai:8000 으로 호출
+    ports:
+      - '127.0.0.1:8000:8000'
+    restart: unless-stopped
+    mem_limit: 512m
+    networks:
+      - dokdok-shared
+
+networks:
+  dokdok-shared:
+    external: true
