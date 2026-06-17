@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = None
     STT_MODEL: str = "whisper-1"
-    SUMMARY_MODEL: str = "gemini-flash-latest"
+    SUMMARY_MODEL: str = "gemini-2.5-flash"
     CLOVA_SPEECH_API_URL: Optional[str] = None
     CLOVA_CLIENT_ID: Optional[str] = None
     CLOVA_CLIENT_SECRET: Optional[str] = None
